@@ -1,14 +1,16 @@
 /*
   Projeto: ESP8266 - Login com senha e token de sessão
-  Autor: Anderson Coelho
+  Autor: Anderson Coelho (ChatGBT)
   Data: 14/08/2025
-  Versão: 1.0
+  Versão: 2.0
 
   Descrição:
   Este sketch implementa um servidor web no ESP8266 com:
     - Tela de login apenas com senha
     - Token de sessão gerado aleatoriamente
+    - Expiração automática do token (5 minutos)
     - Página de boas-vindas após login
+    - Logout funcional com invalidação do token
     - Dashboard protegido por autenticação
 
   Bibliotecas utilizadas:
@@ -18,8 +20,9 @@
   Configurações importantes:
     - SSID e senha da rede Wi-Fi no setup()
     - Senha de login configurada na variável 'adminPass'
+    - Tempo de expiração do token definido em 'TOKEN_EXPIRATION'
 
-    
+ 
 */
 
 
@@ -28,8 +31,13 @@
 
 const char* adminPass = "1234";
 String sessionToken = "";
+unsigned long tokenTime = 0;           
+const unsigned long TOKEN_EXPIRATION = 5 * 60 * 1000; // 5 minutos em milissegundos
 
 ESP8266WebServer server(80);
+
+// Variável para mostrar mensagem de sessão expirada
+bool sessionExpired = false;
 
 // ===== Gera token aleatório =====
 String generateSessionToken() {
@@ -42,6 +50,16 @@ String generateSessionToken() {
 
 // ===== Verifica autenticação =====
 bool isAuthenticated() {
+  if (sessionToken == "") return false;
+
+  // Verifica expiração
+  if (millis() - tokenTime > TOKEN_EXPIRATION) {
+    Serial.println("[INFO] Token expirou");
+    sessionToken = "";
+    sessionExpired = true;
+    return false;
+  }
+
   if (server.hasHeader("Cookie")) {
     String cookie = server.header("Cookie");
     if (cookie.indexOf("session=" + sessionToken) != -1) {
@@ -53,11 +71,17 @@ bool isAuthenticated() {
 
 // ===== Página de login =====
 void handleLoginPage() {
-  String html = "<html><body><h2>Login</h2>"
-                "<form action='/login' method='POST'>"
-                "Senha: <input type='password' name='password'><br>"
-                "<input type='submit' value='Entrar'>"
-                "</form></body></html>";
+  String html = "<html><body><h2>Login</h2>";
+  
+  if (sessionExpired) {
+    html += "<p style='color:red;'>Sessão expirou! Por favor, faça login novamente.</p>";
+    sessionExpired = false; // Reseta a flag
+  }
+
+  html += "<form action='/login' method='POST'>"
+          "Senha: <input type='password' name='password'><br>"
+          "<input type='submit' value='Entrar'>"
+          "</form></body></html>";
   server.send(200, "text/html", html);
 }
 
@@ -68,9 +92,10 @@ void handleLogin() {
 
     if (password == adminPass) {
       sessionToken = generateSessionToken();
+      tokenTime = millis();  // marca o horário do login
       Serial.println("[INFO] Token gerado: " + sessionToken);
 
-      // Monta página de boas-vindas com cookie
+      // Página de boas-vindas com cookie
       String html = "<html><body>"
                     "<h1>🎉 Bem-vindo!</h1>"
                     "<p>Senha aceita com sucesso.</p>"
